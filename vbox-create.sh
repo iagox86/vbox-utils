@@ -1,13 +1,16 @@
 #!/bin/bash
 
+NAME="$1"
+ISO="$2"
+
 VBOX="/usr/bin/VBoxManage"
 VBOXUI="/usr/bin/VBoxSDL"
 VBOXADDITIONS="/vmware/iso/VBoxGuestAdditions_4.1.18.iso"
 MEMORY="1024" # Set 1gb ram
-HARDDRIVE="32000" # Set 32gb harddrive
+HDD_SIZE="32000" # Set 32gb harddrive
+VM_DIR="/vmware/VirtualBox/$NAME"
+HDD_FILE="$VM_DIR/hdd.vmi"
 BRIDGE="eth0" # Set the bridged interface to eth0
-NAME="$1"
-ISO="$2"
 
 die()
 {
@@ -30,7 +33,10 @@ if [ $# -ne 2 ]; then
   exit
 fi
 
-$VBOX showvminfo "$NAME" > /dev/null && alreadyexists
+# Create the directory where we're gonna be storing the harddrive
+/bin/mkdir -p "$VM_DIR"
+
+$VBOX showvminfo "$NAME" > /dev/null 2>&1 && alreadyexists
 
 # Create and register the VM
 $VBOX createvm --name "$NAME" --register || die "Failed to create VM"
@@ -46,10 +52,10 @@ $VBOX storagectl "$NAME" --name scsi --add scsi || die "Failed to create SCSI in
 $VBOX storagectl "$NAME" --name ide  --add ide || die "Failed to create IDE interface"
 
 # Create a harddrive file
-$VBOX createhd --filename hdd.vmi --size $HARDDRIVE || die "Failed to crate harddrive file: $HARDDRIVE"
+$VBOX createhd --filename "$HDD_FILE" --size "$HDD_SIZE" || die "Failed to crate harddrive file: $HDD_FILE"
 
 # Attach the SCSI interface
-$VBOX storageattach "$NAME" --storagectl scsi --type hdd --medium hdd.vmi --port 0 || die "Failed to attach hdd.vmi"
+$VBOX storageattach "$NAME" --storagectl scsi --type hdd --medium "$HDD_FILE" --port 0 || die "Failed to attach hdd.vmi"
 
 # Attach the requested ISO
 $VBOX storageattach "$NAME" --storagectl ide --type dvddrive --medium "$ISO" --port 0 --device 0 || die "Failed to attach the cdrom ISO"
