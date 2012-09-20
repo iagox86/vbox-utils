@@ -19,5 +19,5 @@ if [ $# -ne 1 ]; then
   exit
 fi
 
-$VBOX storageattach "$NAME" --storagectl ide --type dvddrive --medium "$VBOXADDITIONS" --port 0 --device 0 || die "Failed to attach VBoxAdditions"
+$VBOX storageattach "$NAME" --storagectl ide --type dvddrive --medium "$VBOXADDITIONS" --port 0 --device 1 || die "Failed to attach VBoxAdditions"
 
