@@ -53,6 +53,11 @@ $VBOX modifyvm "$NAME" --memory $MEMORY || die "Failed to set memory"
 echo ">>> Creating a network bridge to $BRIDGE..."
 $VBOX modifyvm "$NAME" --nic1 bridged --bridgeadapter1 $BRIDGE || die "Failed to set NIC"
 
+# Enable APIC
+echo ">>> Enabling APIC..."
+$VBOX modifyvm "$NAME" --ioapic on || die "Failed to enable APIC"
+
+
 # Create a SCSI and a IDE interface
 #$VBOX storagectl "$NAME" --name scsi --add scsi || die "Failed to create SCSI interface}"
 echo ">>> Creating an IDE interface..."
@@ -76,7 +81,8 @@ $VBOXUI --startvm "$NAME" --hostkey 306 308 320 > /dev/null 2>&1 &
 
 echo "--------------------------------------------------------------------------------"
 echo "Press <ENTER> when you're ready to take a base snapshot"
-echo "(You should do it the first time the login screen is up)"
+echo "(You should do it the first time the login screen is up or when it's"
+echo "activated successfully)"
 echo "(Press ctrl+alt to release mouse)"
 echo "--------------------------------------------------------------------------------"
 read

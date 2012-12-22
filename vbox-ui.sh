@@ -8,5 +8,5 @@ if [ $# -ne 1 ]; then
   exit
 fi
 
-$VBOXUI --startvm "$NAME" --hostkey 306 308 320 > /dev/null 2>&1
+$VBOXUI --startvm "$NAME" --hostkey 306 308 320
 
