@@ -5,7 +5,6 @@ ISO="$2"
 
 VBOX="/usr/bin/VBoxManage"
 VBOXUI="/usr/bin/VBoxSDL"
-VBOXADDITIONS="/vmware/iso/VBoxGuestAdditions.iso"
 MEMORY="1024" # Set 1gb ram
 HDD_SIZE="32000" # Set 32gb harddrive
 VM_DIR="/vmware/VirtualBox/$NAME"
@@ -49,9 +48,11 @@ $VBOX createvm --name "$NAME" --register || die "Failed to create VM"
 echo ">>> Setting the memory to $MEMORY"
 $VBOX modifyvm "$NAME" --memory $MEMORY || die "Failed to set memory"
 
-# Set the first nic as bridged
-echo ">>> Creating a network bridge to $BRIDGE..."
-$VBOX modifyvm "$NAME" --nic1 bridged --bridgeadapter1 $BRIDGE || die "Failed to set NIC"
+# Set up the networking
+$(dirname $0)/vbox-set-up-networking.sh "$NAME"
+
+# Set up shared folders
+$(dirname $0)/vbox-add-shared-folders.sh "$NAME" "public"
 
 # Enable APIC
 echo ">>> Enabling APIC..."
@@ -71,38 +72,45 @@ echo ">>> Attaching the harddrive"
 $VBOX storageattach "$NAME" --storagectl ide --type hdd --medium "$HDD_FILE" --port 0 --device 0 || die "Failed to attach $HDD_FILE"
 
 # Attach the requested ISO
-echo ">>> Attaching $ISO..."
-$VBOX storageattach "$NAME" --storagectl ide --type dvddrive --medium "$ISO" --port 0 --device 1 || die "Failed to attach the cdrom ISO"
-
-echo ">>> Adding 'public' share..."
-$VBOX sharedfolder add "$NAME" --name "public" --hostpath "/vmware/shared/public" --automount || die "Couldn't add the shared folder"
+$(dirname $0)/vbox-mount-cd.sh "$NAME" "$ISO"
 
 # Turn the VM on, in the background
-echo "Starting the UI and waiting..."
-$VBOXUI --startvm "$NAME" --hostkey 306 308 320 > /dev/null 2>&1 &
+echo "Starting the UI in the background and waiting..."
+$(dirname $0)/vbox-ui.sh "$NAME" &
+
+echo "--------------------------------------------------------------------------------"
+echo "Press <ENTER> when you're ready to install drivers (this will disconnect"
+echo "the currenly loaded ISO)"
+echo ""
+echo "(Press ctrl+alt to release mouse from VM UI)"
+echo "--------------------------------------------------------------------------------"
+
+read
+
+echo "Attaching guest additions CD..."
+$(dirname $0)/vbox-install-additions.sh "$NAME"
+
 
 echo "--------------------------------------------------------------------------------"
 echo "Press <ENTER> when you're ready to take a base snapshot"
-echo "(You should do it the first time the login screen is up or when it's"
-echo "activated successfully)"
 echo "(Press ctrl+alt to release mouse)"
 echo "--------------------------------------------------------------------------------"
-read
-echo ">>> Pausing the VM..."
-$VBOX controlvm "$NAME" pause || echo "Failed to pause"
 
-echo ">>> Taking snapshot..."
-$VBOX snapshot "$NAME" take "base install" || echo "Failed to take snapshot"
-
-echo ">>> Resuming the VM..."
-$VBOX controlvm "$NAME" resume || echo "Failed to resume"
-
-echo "--------------------------------------------------------------------------------"
-echo "Press <ENTER> when you're ready to install drivers"
-echo "(Press ctrl+alt to release mouse)"
-echo "--------------------------------------------------------------------------------"
 read
 
-echo "Attaching the ISO $VBOXADDITIONS..."
-$VBOX storageattach "$NAME" --storagectl ide --type dvddrive --medium "$VBOXADDITIONS" --port 0 --device 1 || echo "Failed to attach the cdrom iso"
+$(dirname $0)/vbox-snapshot.sh "$NAME" "base install"
 
+echo "--------------------------------------------------------------------------------"
+echo "Everything should be set up!"
+echo "Here are a couple helpful commands:"
+echo
+echo "Linux:"
+echo "  sudo mkdir /mnt/public; sudo mount -t vboxsf -o uid=ron public /mnt/public"
+echo
+echo "Windows:"
+echo '  net use z: \\vboxsrv\public'
+echo
+echo "Once you've mounted the share, you can find some helpful scripts in"
+echo " /mnt/public/scripts/<linux|windows>"
+echo
+echo "--------------------------------------------------------------------------------"

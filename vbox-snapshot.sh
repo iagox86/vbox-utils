@@ -5,7 +5,7 @@ SNAPSHOT="$2"
 VBOX="/usr/bin/VBoxManage"
 
 if [ $# -ne 2 ]; then
-  echo "Usage: vbox-snapshot.sh <vm name> <snapshot name>"
+  echo "Usage: $0 <vm name> <snapshot name>"
   exit
 fi
 

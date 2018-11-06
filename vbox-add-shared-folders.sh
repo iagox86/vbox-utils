@@ -17,5 +17,8 @@ fi
 echo ">>> Removing the old share that we don't use anymore..."
 $VBOX sharedfolder remove "$NAME" --name "shared" 2>/dev/null
 
+echo ">>> Removing the share..."
+$VBOX sharedfolder remove "$NAME" --name "$SHARE" 2>/dev/null
+
 echo ">>> Adding new share..."
-$VBOX sharedfolder add "$NAME" --name "$SHARE" --hostpath "/vmware/shared/$NAME" --automount || die "Couldn't add the share; make sure the VM is turned off"
+$VBOX sharedfolder add "$NAME" --name "$SHARE" --hostpath "/vmware/shared/$SHARE" --automount || die "Couldn't add the share; make sure the VM is turned off"
