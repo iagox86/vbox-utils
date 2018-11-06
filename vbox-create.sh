@@ -57,7 +57,6 @@ $VBOX modifyvm "$NAME" --nic1 bridged --bridgeadapter1 $BRIDGE || die "Failed to
 echo ">>> Enabling APIC..."
 $VBOX modifyvm "$NAME" --ioapic on || die "Failed to enable APIC"
 
-
 # Create a SCSI and a IDE interface
 #$VBOX storagectl "$NAME" --name scsi --add scsi || die "Failed to create SCSI interface}"
 echo ">>> Creating an IDE interface..."
@@ -74,6 +73,9 @@ $VBOX storageattach "$NAME" --storagectl ide --type hdd --medium "$HDD_FILE" --p
 # Attach the requested ISO
 echo ">>> Attaching $ISO..."
 $VBOX storageattach "$NAME" --storagectl ide --type dvddrive --medium "$ISO" --port 0 --device 1 || die "Failed to attach the cdrom ISO"
+
+echo ">>> Adding 'public' share..."
+$VBOX sharedfolder add "$NAME" --name "public" --hostpath "/vmware/shared/public" --automount || die "Couldn't add the shared folder"
 
 # Turn the VM on, in the background
 echo "Starting the UI and waiting..."
