@@ -12,6 +12,9 @@ fi
 echo ">>> Pausing the VM..."
 $VBOX controlvm "$NAME" pause || echo "Failed to pause"
 
+echo ">>> Removing snapshot '$SNAPSHOT' if it exists..."
+$VBOX snapshot "$NAME" delete "$SNAPSHOT" || echo "Failed to delete snapshot"
+
 echo ">>> Taking snapshot '$SNAPSHOT'..."
 $VBOX snapshot "$NAME" take "$SNAPSHOT" || echo "Failed to take snapshot"
 

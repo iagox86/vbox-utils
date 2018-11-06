@@ -4,7 +4,7 @@ NAME="$1"
 
 VBOX="/usr/bin/VBoxManage"
 VBOXUI="/usr/bin/VBoxSDL"
-VBOXADDITIONS="/vmware/iso/VBoxGuestAdditions_4.1.18.iso"
+VBOXADDITIONS="/vmware/iso/VBoxGuestAdditions.iso"
 VM_DIR="/vmware/VirtualBox/$NAME"
 
 if [ $# -ne 1 ]; then

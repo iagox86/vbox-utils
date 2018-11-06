@@ -5,12 +5,12 @@ ISO="$2"
 
 VBOX="/usr/bin/VBoxManage"
 VBOXUI="/usr/bin/VBoxSDL"
-VBOXADDITIONS="/vmware/iso/VBoxGuestAdditions_4.1.18.iso"
+VBOXADDITIONS="/vmware/iso/VBoxGuestAdditions.iso"
 MEMORY="1024" # Set 1gb ram
 HDD_SIZE="32000" # Set 32gb harddrive
 VM_DIR="/vmware/VirtualBox/$NAME"
 HDD_FILE="$VM_DIR/hdd.vmi"
-BRIDGE="eth0" # Set the bridged interface to eth0
+BRIDGE="wlp4s0" # Set the bridged interface to eth0
 
 die()
 {
@@ -49,7 +49,7 @@ $VBOX createvm --name "$NAME" --register || die "Failed to create VM"
 echo ">>> Setting the memory to $MEMORY"
 $VBOX modifyvm "$NAME" --memory $MEMORY || die "Failed to set memory"
 
-# Set the first nic as bridged to eth0
+# Set the first nic as bridged
 echo ">>> Creating a network bridge to $BRIDGE..."
 $VBOX modifyvm "$NAME" --nic1 bridged --bridgeadapter1 $BRIDGE || die "Failed to set NIC"
 
