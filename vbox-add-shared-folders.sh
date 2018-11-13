@@ -11,7 +11,7 @@ die()
 }
 
 if [ $# -ne 2 ]; then
-  echo "Usage: $0 <name> <public|private>"
+  die "Usage: $0 <name> <public|private>"
 fi
 
 echo ">>> Removing the old share that we don't use anymore..."

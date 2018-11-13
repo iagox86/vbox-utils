@@ -58,6 +58,12 @@ $(dirname $0)/vbox-add-shared-folders.sh "$NAME" "public"
 echo ">>> Enabling APIC..."
 $VBOX modifyvm "$NAME" --ioapic on || die "Failed to enable APIC"
 
+# Setting video memory to 48 MB
+$VBOX modifyvm "$NAME" --vram 48
+
+# Setting the OS to Windows 64-bit
+$VBOX modifyvm "$NAME" --ostype "WindowsNT_64"
+
 # Create a SCSI and a IDE interface
 #$VBOX storagectl "$NAME" --name scsi --add scsi || die "Failed to create SCSI interface}"
 echo ">>> Creating an IDE interface..."

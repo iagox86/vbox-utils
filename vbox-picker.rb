@@ -1,3 +1,5 @@
+#!/usr/bin/ruby
+
 VBOXMANAGE = '/usr/bin/VBoxManage'.freeze
 DIR = File.expand_path(File.dirname(__FILE__))
 
@@ -22,7 +24,4 @@ end
 
 if !fork
   system("#{DIR}/vbox-ui.sh \"#{VMS[i]}\"")
-  puts("Child!")
-else
-  puts("Parent!")
 end
