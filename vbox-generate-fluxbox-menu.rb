@@ -4,14 +4,30 @@ TEMPLATE = "
 [begin] (Fluxbox 1.1.1)
   [encoding] {UTF-8}
 
-  [exec] (xterm) {uxterm -ls -sl 5000 -fg white -bg black /usr/bin/fish}
-  [exec] (chrome) {google-chrome-beta}
-  [exec] (chrome-work) {google-chrome-beta --user-data-dir=/home/ron/.counterhack}
-  [exec] (wireshark) {gksu wireshark}
-  [exec] (sound) {unity-control-center sound}
+  [exec] (Xterm) {uxterm -ls -sl 5000 -fg white -bg black /usr/bin/fish}
+  [exec] (Chrome) {google-chrome-beta}
+  [exec] (Chrome - work) {google-chrome-beta --user-data-dir=/home/ron/.counterhack}
+  [exec] (Wireshark) {gksu wireshark}
+  [exec] (Sound Settings) {unity-control-center sound}
+
+  [separator]
 
   [submenu] (VMs)
 <<<VMS>>>
+  [end]
+
+  [submenu] (Monitors)
+    [exec] (Standalone Laptop) (xrand --output eDP1 --mode 2560x1440 --output HDMI2 --off --output DP1 --off)
+    [exec] (Standalone Laptop - Lo Res) (xrand --output eDP1 --mode 1920x1080 --output HDMI2 --off --output DP1 --off)
+
+    [separator]
+
+    [exec] (Presentation - Mirror HDMI 1440) (xrand --output eDP1 --mode 2560x1440 --output HDMI2 --mode 2560x1440 --same-as eDP1 --output DP1 --off)
+    [exec] (Presentation - Mirror HDMI 1080) (xrand --output eDP1 --mode 1920x1080 --output HDMI2 --mode 1920x1080 --same-as eDP1 --output DP1 --off)
+
+    [separator]
+
+    [exec] (Home Office) (xrandr --output eDP1 --mode 2560x1440 --output HDMI2 --mode 2560x1440 --same-as eDP1 --output DP1 --mode 2560x1440 --left-of eDP1)
   [end]
 
   [separator]
