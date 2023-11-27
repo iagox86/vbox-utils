@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'optimist'
+require 'fileutils'
 
 # Things to look into:
 # * Unattended install
@@ -11,10 +12,15 @@ UUID_REGEX = '[0-9a-fA-F]{8}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\
 
 # Set up defaults
 DEFAULT_MEMORY = 1024
-HDD_SIZE = 32_000 # Set 32gb harddrive
-VM_DIR = '/home/ron/VirtualBox VMs' # TODO: Can we interpret ~?
-HDD_FILE = 'hdd.vmi'
-BRIDGE = 'wlp0s20f3'
+DEFAULT_BRIDGE = 'wlp0s20f3'
+DEFAULT_HDD = 32_000 # Set 32gb harddrive
+DEFAULT_VRAM = 16
+DEFAULT_OSTYPE = 'Linux26_64'
+DEFAULT_CPUS = 2
+DEFAULT_SHARE = '~/shared:shared'
+VM_DIR = '~/VirtualBox VMs'
+
+# HDD_FILE = 'hdd.vmi'
 
 SUBCOMMANDS = [
   {
@@ -70,6 +76,11 @@ SUBCOMMANDS = [
   {
     name: 'suspendall',
     description: 'Suspend all VMs',
+    requires_vm: false,
+  },
+  {
+    name: 'ostypes',
+    description: 'Get a list of supported os types',
     requires_vm: false,
   },
 ].freeze
@@ -141,9 +152,20 @@ cmd_opts = Optimist.options do
   when 'list'
     opt(:regex, 'Only show VMs that match the given regex (case insensitive)', default: '.*')
   when 'info'
-    # TODO
+    # n/a
   when 'create'
-    # TODO
+    opt(:name, 'Give this name to the VM', type: String, required: true)
+    opt(:iso, 'Mount the given iso', type: String, required: true)
+    opt(:memory, "The size, in MB, of the VM's memory", default: DEFAULT_MEMORY)
+    opt(:bridge, 'The network to bridge networking to', default: DEFAULT_BRIDGE)
+    opt(:hdd, "The size, in MB, of the VM's HDD", default: DEFAULT_HDD)
+    opt(:vram, "The size, in MB, of the VM's VRAM", default: DEFAULT_VRAM)
+    opt(:ostype, "The OS type (use '#{$PROGRAM_NAME} ostypes' for a list of options)", default: DEFAULT_OSTYPE)
+    opt(:cpus, 'The number of CPUs', default: DEFAULT_CPUS)
+    opt(:share, 'Folder to share (format is "localpath:name")', default: DEFAULT_SHARE)
+
+    opt(:dir, 'The directory to store VMs in', default: VM_DIR)
+    opt(:dryrun, "Show the command but don't actually make any changes", default: false)
   when 'delete'
     # TODO
   when 'snapshot'
@@ -158,8 +180,6 @@ cmd_opts = Optimist.options do
     # TODO
   when 'suspendall'
     # TODO
-  else
-    Optimist.die "unknown subcommand #{command.inspect}"
   end
 end
 
@@ -236,6 +256,14 @@ if COMMAND_DETAILS[:requires_vm]
   }.freeze
 end
 
+# Get a list of OSTypes, which are used in a couple different commands
+OS_TYPES = `#{VBOX} list ostypes`
+           .split("\n")
+           .grep(/^ID:/)
+           .map { |line| line.gsub(/^ID: */, '') }
+           .sort
+           .uniq
+
 case command
 when 'list'
   puts 'UUID                                 Name'
@@ -263,16 +291,85 @@ when 'info'
   end.compact.to_h
   pp info
 when 'create'
-  # TODO
-  if cmd_opts[:name].nil?
-    warn subcommands[command].help()
-    warn '---'
-    warn 'Missing --name option'
+  # Sanity checks
+  unless VMS_BY_NAME[cmd_opts[:name]].nil?
+    warn "A VM with that name already exists: #{cmd_opts[:name]}"
     exit 1
   end
 
-  puts 'hi'
-  pp cmd_opts
+  unless File.exist?(cmd_opts[:iso])
+    warn "ISO file does not appear to exist: #{cmd_opts[:iso]}"
+    exit 1
+  end
+
+  unless OS_TYPES.include?(cmd_opts[:ostype])
+    warn "Invalid ostype: #{cmd_opts[:iso]}"
+    warn "Run '#{$PROGRAM_NAME} ostypes' for a full list"
+    exit 1
+  end
+
+  DIR = File.expand_path(cmd_opts[:dir])
+
+  unless cmd_opts[:dryrun]
+    FileUtils.mkdir_p(DIR)
+  end
+
+  commands = [
+    "#{VBOX} createvm --name='#{cmd_opts[:name]}' --register --basefolder='#{DIR}'",
+    "#{VBOX} modifyvm '#{cmd_opts[:name]}' --memory #{cmd_opts[:memory]}",
+    "#{VBOX} modifyvm '#{cmd_opts[:name]}' --ioapic on",
+    "#{VBOX} modifyvm '#{cmd_opts[:name]}' --vram #{cmd_opts[:vram]}",
+    "#{VBOX} modifyvm '#{cmd_opts[:name]}' --os-type '#{cmd_opts[:ostype]}'",
+    "#{VBOX} modifyvm '#{cmd_opts[:name]}' --boot1 dvd --boot2 disk --boot3 none --boot4 none",
+    "#{VBOX} modifyvm '#{cmd_opts[:name]}' --cpus #{cmd_opts[:cpus]}",
+    "#{VBOX} modifyvm '#{cmd_opts[:name]}' --audio none",
+    "#{VBOX} modifyvm '#{cmd_opts[:name]}' --usb off --usbehci off --usbxhci off",
+    "#{VBOX} modifyvm '#{cmd_opts[:name]}' --nic1 bridged --bridgeadapter1 '#{DEFAULT_BRIDGE}' --cableconnected1 on",
+    "#{VBOX} modifyvm '#{cmd_opts[:name]}' --nic2 nat --cableconnected2 on",
+    "#{VBOX} modifyvm '#{cmd_opts[:name]}' --nic3 hostonly --cableconnected3 on",
+  ]
+
+  # Add the share, if we have one
+  if cmd_opts[:share] && !cmd_opts[:share].empty?
+    split = cmd_opts[:share].split(':')
+    SHARED_PATH = File.expand_path(split[0])
+    SHARED_NAME = split[1]
+
+    if SHARED_NAME.nil?
+      warn '--share must be in the format directory:name'
+      exit 1
+    end
+
+    unless File.directory?(SHARED_PATH)
+      warn "Folder specified in --share doesn't exist on the local filesystem: #{SHARED_PATH}"
+    end
+
+    commands.push(
+      "#{VBOX} sharedfolder add '#{cmd_opts[:name]}' --name '#{SHARED_NAME}' --hostpath '#{SHARED_PATH}' --automount"
+    )
+  end
+
+  puts 'Will run the following commands in 3 seconds:'
+  puts commands.join("\n")
+  puts
+  sleep(3) # TODO: More obvious delay?
+
+  unless cmd_opts[:dryrun]
+    commands.each do |c|
+      puts "Running: #{c}"
+      out = system(c)
+      if out.nil?
+        warn "Couldn't find the VBox command!"
+        exit 1
+      elsif out == false
+        # TODO: back out?
+        warn 'Something went wrong running the command!'
+        exit 1
+      end
+      sleep 1
+    end
+  end
+  # TODO
 when 'delete'
   # TODO
 when 'snapshot'
@@ -287,75 +384,19 @@ when 'suspend'
   # TODO
 when 'suspendall'
   # TODO
+when 'ostypes'
+  puts OS_TYPES.join("\n")
 else
   warn 'Error!'
 end
 
 exit 0
 
-# NAME="$1"
-# ISO="$2"
-
-# VBOX="/usr/bin/VBoxManage"
-# VBOXUI="/usr/bin/VBoxSDL"
-# MEMORY="1024" # Set 1gb ram
-# HDD_SIZE="32000" # Set 32gb harddrive
-# VM_DIR="/vmware/VirtualBox/$NAME"
-# HDD_FILE="$VM_DIR/hdd.vmi"
-# BRIDGE="wlp4s0" # Set the bridged interface to eth0
-
-# die()
-# {
-#   $VBOX unregistervm "$NAME" --delete
-#   rm "$HDD_FILE"
-#   echo "ERROR: ${1}"
-#   exit
-# }
-
-# alreadyexists()
-# {
-#   echo "--------------------------------------------------------------------------------"
-#   echo "VM already exists; to remove, run:"
-#   echo "$VBOX unregistervm \"$NAME\" --delete"
-#   echo "--------------------------------------------------------------------------------"
-#   exit
-# }
-
-# if [ $# -ne 2 ]; then
-#   echo "Usage: create.sh <name> <iso>"
-#   exit
-# fi
-
-# echo ">>> Checking if this VM already exists..."
-# $VBOX showvminfo "$NAME" > /dev/null 2>&1 && alreadyexists
-
-# # Create the directory where we're gonna be storing the harddrive
-# echo ">>> Creating a directory for the VM $VM_DIR..."
-# /bin/mkdir -p "$VM_DIR"
-
-# # Create and register the VM
-# echo ">>> Creating and registering the VM $NAME..."
-# $VBOX createvm --name "$NAME" --register || die "Failed to create VM"
-
-# # Set the memory to $MEMORY
-# echo ">>> Setting the memory to $MEMORY"
-# $VBOX modifyvm "$NAME" --memory $MEMORY || die "Failed to set memory"
-
 # # Set up the networking
 # $(dirname $0)/vbox-set-up-networking.sh "$NAME"
 
 # # Set up shared folders
 # $(dirname $0)/vbox-add-shared-folders.sh "$NAME" "public"
-
-# # Enable APIC
-# echo ">>> Enabling APIC..."
-# $VBOX modifyvm "$NAME" --ioapic on || die "Failed to enable APIC"
-
-# # Setting video memory to 48 MB
-# $VBOX modifyvm "$NAME" --vram 48
-
-# # Setting the OS to Windows 64-bit
-# $VBOX modifyvm "$NAME" --ostype "WindowsNT_64"
 
 # # Create a SCSI and a IDE interface
 # #$VBOX storagectl "$NAME" --name scsi --add scsi || die "Failed to create SCSI interface}"
