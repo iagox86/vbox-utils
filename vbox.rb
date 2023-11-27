@@ -1,44 +1,170 @@
 # frozen_string_literal: true
 
-require 'optparse'
+require 'optimist'
 
 # Things to look into:
 # * Unattended install
 # * Clipboard
+# * OVF
 
 UUID_REGEX = '[0-9a-fA-F]{8}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{12}'
 
-options = {}
+# Set up defaults
+DEFAULT_MEMORY = 1024
+HDD_SIZE = 32_000 # Set 32gb harddrive
+VM_DIR = '/home/ron/VirtualBox VMs' # TODO: Can we interpret ~?
+HDD_FILE = 'hdd.vmi'
+BRIDGE = 'wlp0s20f3'
 
-global_opts = OptionParser.new do |opts|
-  opts.banner = "Usage: #{$PROGRAM_NAME} [options] [subcommand [options]]"
+SUBCOMMANDS = [
+  {
+    name: 'list',
+    description: 'List all VMs',
+    requires_vm: false,
+  },
+  {
+    name: 'info',
+    description: 'Get information on a VM',
+    requires_vm: true,
+  },
+  {
+    name: 'create',
+    description: 'Create a new VM',
+    requires_vm: false,
+  },
+  {
+    name: 'delete',
+    description: 'Delete a VM',
+    requires_vm: true,
+  },
+  {
+    name: 'snapshot',
+    description: 'Take a snapshot of a VM',
+    requires_vm: true,
+  },
+  {
+    name: 'restore',
+    description: 'Restore a snapshot of a VM',
+    requires_vm: true,
+  },
+  {
+    name: 'start',
+    description: 'Start a VM',
+    requires_vm: true,
+  },
+  {
+    name: 'stop',
+    description: 'Stop a VM',
+    requires_vm: true,
+  },
+  {
+    name: 'stopall',
+    description: 'Stop all VMs',
+    requires_vm: false,
+  },
+  {
+    name: 'suspend',
+    description: 'Suspend a VM',
+    requires_vm: true,
+  },
+  {
+    name: 'suspendall',
+    description: 'Suspend all VMs',
+    requires_vm: false,
+  },
+].freeze
 
-  opts.on('-vPATH', '--vbox=PATH to the VBox binary') do |v|
-    options[:vbox] = v
+BANNER_HEADER = <<~BANNER
+  VirtualBox Management Utility
+
+  Usage:
+    #{$PROGRAM_NAME} [global options] <SUBCOMMAND> [subcommand options]
+
+  For help on a subcommand, run:
+    #{$PROGRAM_NAME} [global options] <SUBCOMMAND> --help
+BANNER
+
+global_opts = Optimist.options do
+  banner <<~BANNER
+    #{BANNER_HEADER}
+    Available subcommands:
+    #{
+      SUBCOMMANDS.map do |s|
+        "  #{s[:name]}: #{s[:description]}"
+      end.join("\n")
+    }
+
+    Global options:
+  BANNER
+
+  # opt :dry_run, "Don't actually do anything", :short => "-n"
+  opt(:vbox, 'Path to the VBox binary', default: '/usr/bin/VBoxManage')
+  stop_on(SUBCOMMANDS.map { |s| s[:name].downcase })
+end
+
+command = ARGV.shift # get the subcommand
+if command.nil?
+  warn 'No subcommand found'
+  warn '---'
+  Optimist.educate()
+  exit 1
+end
+
+command_details = SUBCOMMANDS.select { |s| s[:name].downcase == command }
+if command_details.nil? || command_details.empty?
+  warn "Unknown subcommand: #{command}"
+  warn '---'
+  Optimist.educate()
+  exit 1
+end
+COMMAND_DETAILS = command_details.pop
+
+cmd_opts = Optimist.options do
+  banner <<~BANNER
+    #{BANNER_HEADER}
+    Command: '#{command}' - #{COMMAND_DETAILS[:description]}
+    #{
+      if COMMAND_DETAILS[:requires_vm]
+        "\nNote: this command requires --uuid=UUID -or- --name=NAME\n"
+      end
+    }
+    Options for "#{command}":
+  BANNER
+
+  if COMMAND_DETAILS[:requires_vm]
+    opt(:name, 'Target the VM with the given name (can be a regex IF the regex matches exactly one VM)', type: String)
+    opt(:uuid, 'Target the VM with the given uuid', type: String)
+    opt(:noregex, 'Turns off regex matching on --name argument')
   end
 
-  opts.separator ''
-
-  opts.separator <<~HELP
-    Commands:
-       list        : List VMs
-       info        : Info about a VM
-       create      : Create a VM
-       delete      : Delete a VM
-       snapshot    : Snapshot a VM
-       restore     : Restore a snapshot
-       boot        : Boot a VM
-       stop        : Stop a VM
-       suspend     : Suspend a VM
-       suspendall  : Suspend _all_ VMs
-
-    Run '#{$PROGRAM_NAME} <command> --help' for more information on a specific command.
-  HELP
+  case command
+  when 'list'
+    opt(:regex, 'Only show VMs that match the given regex (case insensitive)', default: '.*')
+  when 'info'
+    # TODO
+  when 'create'
+    # TODO
+  when 'delete'
+    # TODO
+  when 'snapshot'
+    # TODO
+  when 'restore'
+    # TODO
+  when 'start'
+    # TODO
+  when 'stop'
+    # TODO
+  when 'suspend'
+    # TODO
+  when 'suspendall'
+    # TODO
+  else
+    Optimist.die "unknown subcommand #{command.inspect}"
+  end
 end
-global_opts.order!() # .order() is required to parse subcommands correctly
 
 # Set some globals
-VBOX = options[:vbox] || '/usr/bin/VBoxManage'
+VBOX = global_opts[:vbox] || '/usr/bin/VBoxManage'
 unless File.exist?(VBOX)
   warn "#{VBOX} does not exist"
   exit 1
@@ -49,187 +175,104 @@ unless File.executable?(VBOX)
 end
 
 # Load a list of VMs
-# VBoxManage list vms
-VMS_BY_NAME = `#{VBOX} list vms`.split(/\n/).map do |line|
+VMS_BY_NAME = `#{VBOX} list vms`.split("\n").to_h do |line|
   unless line =~ /^"(.*)" \{(#{UUID_REGEX})\}/
     warn "Couldn't parse line from VBoxManage output: #{line}"
     exit 1
   end
   [Regexp.last_match(1), Regexp.last_match(2)]
-end.to_h
+end
 VMS_BY_UUID = VMS_BY_NAME.invert()
 
+# Sanity check
 if VMS_BY_UUID.length != VMS_BY_NAME.length
   warn "Warning: There are multiple VMs with the same name (or same UUID), that's bad!"
   exit 1
 end
 
-def opts_get_name_or_uuid(opts, options)
-  opts.on('-uUUID', '--uuid=UUID', "The target VM's UUID") do |v|
-    unless options[:name].nil?
-      warn 'You must specify a UUID -or- a name, not both!'
-      exit 1
-    end
+# Look up the VM if needed
+if COMMAND_DETAILS[:requires_vm]
+  uuid = cmd_opts[:uuid]
+  name = cmd_opts[:name]
 
-    unless v =~ /#{UUID_REGEX}/
-      warn "This must be a valid UUID: #{v}"
-      exit 1
-    end
-
-    unless VMS_BY_UUID.include?(v)
-      warn "No VM found with uuid = #{v}"
-      exit 1
-    end
-
-    options[:uuid] = v
-  end
-  opts.on('-nNAME', '--name=NAME', "The target VM's name") do |v|
-    unless options[:uuid].nil?
-      warn 'You must specify a UUID -or- a name, not both!'
-      exit 1
-    end
-
-    unless VMS_BY_NAME.include?(v)
-      warn "No VM found with name = \"#{v}\" (use the UUID if the name is weird)"
-      exit 1
-    end
-
-    options[:name] = v
-  end
-end
-
-def lookup_vm(options)
-  uuid = options[:uuid]
-  name = options[:name]
-
-  if uuid
+  # Whether they specified uuid or name, fill in the other
+  if uuid && name
+    warn 'Error: You must specify --uuid -or- --name, but not both!'
+    exit 1
+  elsif uuid
     name = VMS_BY_UUID[uuid]
     if name.nil?
       warn "No VM found with uuid #{uuid}!"
       exit 1
     end
   elsif name
-    uuid = VMS_BY_NAME[name]
-    if uuid.nil?
-      warn "No VM found with name #{name}!"
-      exit 1
+    if cmd_opts[:noregex]
+      uuid = VMS_BY_NAME[name]
+      if uuid.nil?
+        warn "No VM found with name #{name}!"
+        exit 1
+      end
+    else
+      names = VMS_BY_NAME.keys.grep(/#{name}/i)
+      if names.empty?
+        warn "No VM found with name matching #{name}!"
+        exit 1
+      elsif names.length > 1
+        warn "Multiple VMs found with names matching #{name}: #{names.map { |n| "'#{n}'" }.join(', ')}"
+        warn '(Hint: use --noregex to turn off regex matching)'
+        exit 1
+      else
+        uuid = VMS_BY_NAME[names.pop]
+      end
     end
   else
-    warn 'Name or UUID are required!'
+    warn "Error: You must specify --uuid or --name! (use '#{$PROGRAM_NAME} list' to see a list)"
     exit 1
   end
 
-  { uuid: uuid, name: name }
+  VM = {
+    uuid: uuid,
+    name: name,
+  }.freeze
 end
-
-subcommands = {
-  'list' => OptionParser.new do |opts|
-    opts.banner = 'Usage: list [options]'
-    opts.on('-mREGEX', '--match=REGEX', 'Only show VMs that match the given regex (case insensitive)') do |v|
-      options[:match] = v
-    end
-  end,
-
-  'info' => OptionParser.new do |opts|
-    opts.banner = 'Usage: info <--uuid=UUID|--name=NAME> [options]'
-    opts_get_name_or_uuid(opts, options)
-  end,
-
-  'create' => OptionParser.new do |opts|
-    opts.banner = 'Usage: create [options]'
-    # opts.on("-f", "--[no-]force", "force verbosely") do |v|
-    #   options[:force] = v
-    # end
-  end,
-
-  'delete' => OptionParser.new do |opts|
-    opts.banner = 'Usage: delete <--uuid=UUID|--name=NAME> [options]'
-
-    opts_get_name_or_uuid(opts, options)
-  end,
-
-  'boot' => OptionParser.new do |opts|
-    opts.banner = 'Usage: delete <--uuid=UUID|--name=NAME> [options]'
-
-    opts_get_name_or_uuid(opts, options)
-  end,
-
-  'stop' => OptionParser.new do |opts|
-    opts.banner = 'Usage: stop <--uuid=UUID|--name=NAME> [options]'
-
-    opts_get_name_or_uuid(opts, options)
-  end,
-
-  'suspend' => OptionParser.new do |opts|
-    opts.banner = 'Usage: suspend <--uuid=UUID|--name=NAME> [options]'
-
-    opts_get_name_or_uuid(opts, options)
-  end,
-
-  'suspendall' => OptionParser.new do |opts|
-    opts.banner = 'Usage: suspendall [options]'
-  end,
-
-  'snapshot' => OptionParser.new do |opts|
-    opts.banner = 'Usage: snapshot <--uuid=UUID|--name=NAME> [options]'
-
-    opts_get_name_or_uuid(opts, options)
-  end,
-
-  'restore' => OptionParser.new do |opts|
-    opts.banner = 'Usage: restore <--uuid=UUID|--name=NAME> [options]'
-
-    opts_get_name_or_uuid(opts, options)
-  end,
-}
-
-# Get the subcommand
-command = ARGV.shift
-
-# Sanity check
-unless subcommands.include?(command)
-  puts global_opts.help()
-  exit 1
-end
-subcommands[command].order!
 
 case command
 when 'list'
   puts 'UUID                                 Name'
   puts '----                                 ----'
 
-  if options[:match]
-    vm_names = VMS_BY_NAME.keys.select { |k| k =~ /#{options[:match]}/i }
+  if cmd_opts[:regex]
+    vm_names = VMS_BY_NAME.keys.grep(/#{cmd_opts[:regex]}/i)
   else
     vm_names = VMS_BY_NAME.keys
   end
 
-  vm_names.each do |name|
-    puts "#{VMS_BY_NAME[name]} #{name}"
+  vm_names.each do |n|
+    puts "#{VMS_BY_NAME[n]} #{n}"
   end
 when 'info'
-  vm = lookup_vm(options)
-
-  info = `#{VBOX} showvminfo #{vm[:uuid]} --machinereadable`.split(/\n/).map do |line|
-    if line =~ /^([^=]+)="(.*)"/
-      # If the value is quoted
+  info = `#{VBOX} showvminfo #{VM[:uuid]} --machinereadable`.split("\n").map do |line|
+    # Handle either quoted or unquoted values
+    if line =~ /^([^=]+)="(.*)"/ || line =~ /^([^=]+)=(.*)/
       [Regexp.last_match(1), Regexp.last_match(2)]
-
-    elsif line =~ /^([^=]+)=(.*)/
-      # If the value is unquoted
-      [Regexp.last_match(1), Regexp.last_match(2)]
-
     else
       # Blank lines or lines without '=' (because "--machinereadable" isn't very machine readable)
       # .compact() will remove the nil fields
       nil
     end
   end.compact.to_h
-
   pp info
-  # VBoxManage showvminfo <uuid | vmname> [--details] [--machinereadable]
 when 'create'
   # TODO
+  if cmd_opts[:name].nil?
+    warn subcommands[command].help()
+    warn '---'
+    warn 'Missing --name option'
+    exit 1
+  end
+
+  puts 'hi'
+  pp cmd_opts
 when 'delete'
   # TODO
 when 'snapshot'
@@ -244,6 +287,8 @@ when 'suspend'
   # TODO
 when 'suspendall'
   # TODO
+else
+  warn 'Error!'
 end
 
 exit 0
