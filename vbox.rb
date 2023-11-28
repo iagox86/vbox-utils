@@ -13,11 +13,12 @@ UUID_REGEX = '[0-9a-fA-F]{8}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\
 # Set up defaults
 DEFAULT_MEMORY = 1024
 DEFAULT_BRIDGE = 'wlp0s20f3'
-DEFAULT_HDD = 32_000 # Set 32gb harddrive
+DEFAULT_HDD_SIZE = 32_000 # Set 32gb harddrive
 DEFAULT_VRAM = 16
 DEFAULT_OSTYPE = 'Linux26_64'
 DEFAULT_CPUS = 2
 DEFAULT_SHARE = '~/shared:shared'
+DEFAULT_HDD_FILENAME = 'hdd.vmi'
 VM_DIR = '~/VirtualBox VMs'
 
 # HDD_FILE = 'hdd.vmi'
@@ -45,7 +46,7 @@ SUBCOMMANDS = [
   },
   {
     name: 'snapshot',
-    description: 'Take a snapshot of a VM',
+    description: 'Take or remove a snapshot of a VM (by default, will try to remove and then take a snapshot)',
     requires_vm: true,
   },
   {
@@ -81,6 +82,11 @@ SUBCOMMANDS = [
   {
     name: 'ostypes',
     description: 'Get a list of supported os types',
+    requires_vm: false,
+  },
+  {
+    name: 'mount',
+    description: 'Mount an ISO',
     requires_vm: false,
   },
 ].freeze
@@ -158,28 +164,32 @@ cmd_opts = Optimist.options do
     opt(:iso, 'Mount the given iso', type: String, required: true)
     opt(:memory, "The size, in MB, of the VM's memory", default: DEFAULT_MEMORY)
     opt(:bridge, 'The network to bridge networking to', default: DEFAULT_BRIDGE)
-    opt(:hdd, "The size, in MB, of the VM's HDD", default: DEFAULT_HDD)
+    opt(:hdd_size, "The size, in MB, of the VM's HDD", default: DEFAULT_HDD_SIZE)
     opt(:vram, "The size, in MB, of the VM's VRAM", default: DEFAULT_VRAM)
     opt(:ostype, "The OS type (use '#{$PROGRAM_NAME} ostypes' for a list of options)", default: DEFAULT_OSTYPE)
     opt(:cpus, 'The number of CPUs', default: DEFAULT_CPUS)
     opt(:share, 'Folder to share (format is "localpath:name")', default: DEFAULT_SHARE)
+    opt(:hdd_filename, "Name of the harddrive file (relative to the VM's folder)", default: DEFAULT_HDD_FILENAME)
 
     opt(:dir, 'The directory to store VMs in', default: VM_DIR)
     opt(:dryrun, "Show the command but don't actually make any changes", default: false)
+    opt(:nodelay, "Don't wait for the user to cancel", default: false)
   when 'delete'
-    # TODO
+    # n/a
   when 'snapshot'
-    # TODO
+    opt(:snapshot, 'The name to give the snapshot', default: "snapshot_#{DateTime.now.iso8601}")
+    opt(:only_delete, 'Delete the snapshot', default: false)
+    opt(:no_delete, "Don't try to delete the snapshot first", default: false)
   when 'restore'
-    # TODO
+    opt(:snapshot, 'The name of the snapshot to restore (by default, will use the most recent)', required: false)
   when 'start'
-    # TODO
+    # n/a
   when 'stop'
-    # TODO
+    # n/a
   when 'suspend'
-    # TODO
+    # n/a
   when 'suspendall'
-    # TODO
+    # n/a
   end
 end
 
@@ -264,6 +274,75 @@ OS_TYPES = `#{VBOX} list ostypes`
            .sort
            .uniq
 
+def execute_commands(cmds)
+  # Ensure cmd is an array
+  if cmds.is_a?(String)
+    cmds = [cmds]
+  end
+
+  cmds.each do |cmd|
+    puts "Executing: #{cmd}"
+    out = system(cmd)
+
+    if out.nil?
+      warn "Couldn't find the VBox command!"
+      exit 1
+    end
+
+    # Raise an error if something goes wrong
+    unless out
+      raise "Something went wrong running command: #{cmd}"
+    end
+  end
+end
+
+def vm_info(uuid)
+  `#{VBOX} showvminfo '#{uuid}' --machinereadable`.split("\n").map do |line|
+    # Handle either quoted or unquoted values
+    if line =~ /^([^=]+)="(.*)"/ || line =~ /^([^=]+)=(.*)/
+      [Regexp.last_match(1), Regexp.last_match(2)]
+    else
+      # Blank lines or lines without '=' (because "--machinereadable" isn't very machine readable)
+      # .compact() will remove the nil fields
+      nil
+    end
+  end.compact.to_h
+end
+
+def shutdown_vm(uuid, wait: true)
+  info = vm_info(uuid)
+  if info['VMState'] != 'running'
+    puts "VM isn't running, it's #{info['VMState']}"
+    return
+  end
+
+  puts
+  puts 'Powering down...'
+  execute_commands("#{VBOX} controlvm #{VM[:uuid]} poweroff")
+
+  return unless wait
+
+  puts 'Waiting a few seconds for shutdown to complete (not sure how to do this more efficiently...)'
+  sleep(5)
+end
+
+def suspend_vm(uuid, wait: true)
+  info = vm_info(uuid)
+  if info['VMState'] != 'running'
+    puts "VM isn't running, it's #{info['VMState']}"
+    return
+  end
+
+  puts
+  puts 'Saving VM state...'
+  execute_commands("#{VBOX} controlvm #{VM[:uuid]} savestate")
+
+  return unless wait
+
+  puts 'Waiting a few seconds for suspend to complete (not sure how to do this more efficiently...)'
+  sleep(5)
+end
+
 case command
 when 'list'
   puts 'UUID                                 Name'
@@ -279,17 +358,7 @@ when 'list'
     puts "#{VMS_BY_NAME[n]} #{n}"
   end
 when 'info'
-  info = `#{VBOX} showvminfo #{VM[:uuid]} --machinereadable`.split("\n").map do |line|
-    # Handle either quoted or unquoted values
-    if line =~ /^([^=]+)="(.*)"/ || line =~ /^([^=]+)=(.*)/
-      [Regexp.last_match(1), Regexp.last_match(2)]
-    else
-      # Blank lines or lines without '=' (because "--machinereadable" isn't very machine readable)
-      # .compact() will remove the nil fields
-      nil
-    end
-  end.compact.to_h
-  pp info
+  pp vm_info(VM[:uuid])
 when 'create'
   # Sanity checks
   unless VMS_BY_NAME[cmd_opts[:name]].nil?
@@ -309,11 +378,13 @@ when 'create'
   end
 
   DIR = File.expand_path(cmd_opts[:dir])
+  HDD_FILENAME = File.join(DIR, cmd_opts[:name], cmd_opts[:hdd_filename])
 
   unless cmd_opts[:dryrun]
     FileUtils.mkdir_p(DIR)
   end
 
+  # The basic set of commands
   commands = [
     "#{VBOX} createvm --name='#{cmd_opts[:name]}' --register --basefolder='#{DIR}'",
     "#{VBOX} modifyvm '#{cmd_opts[:name]}' --memory #{cmd_opts[:memory]}",
@@ -322,11 +393,24 @@ when 'create'
     "#{VBOX} modifyvm '#{cmd_opts[:name]}' --os-type '#{cmd_opts[:ostype]}'",
     "#{VBOX} modifyvm '#{cmd_opts[:name]}' --boot1 dvd --boot2 disk --boot3 none --boot4 none",
     "#{VBOX} modifyvm '#{cmd_opts[:name]}' --cpus #{cmd_opts[:cpus]}",
-    "#{VBOX} modifyvm '#{cmd_opts[:name]}' --audio none",
+    "#{VBOX} modifyvm '#{cmd_opts[:name]}' --audio-driver none",
+    "#{VBOX} modifyvm '#{cmd_opts[:name]}' --graphicscontroller vmsvga",
     "#{VBOX} modifyvm '#{cmd_opts[:name]}' --usb off --usbehci off --usbxhci off",
+
+    "#{VBOX} modifyvm '#{cmd_opts[:name]}' --clipboard-mode bidirectional",
+
     "#{VBOX} modifyvm '#{cmd_opts[:name]}' --nic1 bridged --bridgeadapter1 '#{DEFAULT_BRIDGE}' --cableconnected1 on",
     "#{VBOX} modifyvm '#{cmd_opts[:name]}' --nic2 nat --cableconnected2 on",
-    "#{VBOX} modifyvm '#{cmd_opts[:name]}' --nic3 hostonly --cableconnected3 on",
+    # "#{VBOX} modifyvm '#{cmd_opts[:name]}' --nic3 hostonly --cableconnected3 on",
+
+    # SCSI will be used for the HDD
+    "#{VBOX} storagectl '#{cmd_opts[:name]}' --name scsi --add scsi",
+    "#{VBOX} createhd --filename '#{HDD_FILENAME}' --size '#{cmd_opts[:hdd_size]}'",
+    "#{VBOX} storageattach '#{cmd_opts[:name]}' --storagectl scsi --type hdd --medium '#{HDD_FILENAME}' --port 0 --device 0",
+
+    # IDE will be used for CDRom
+    "#{VBOX} storagectl '#{cmd_opts[:name]}' --name ide  --add ide",
+    "#{VBOX} storageattach '#{cmd_opts[:name]}' --storagectl ide --type dvddrive --medium '#{cmd_opts[:iso]}' --port 0 --device 0",
   ]
 
   # Add the share, if we have one
@@ -349,41 +433,93 @@ when 'create'
     )
   end
 
-  puts 'Will run the following commands in 3 seconds:'
+  puts 'Will run the following commands shortly, press ctrl-c to stop:'
   puts commands.join("\n")
   puts
-  sleep(3) # TODO: More obvious delay?
 
-  unless cmd_opts[:dryrun]
-    commands.each do |c|
-      puts "Running: #{c}"
-      out = system(c)
-      if out.nil?
-        warn "Couldn't find the VBox command!"
-        exit 1
-      elsif out == false
-        # TODO: back out?
-        warn 'Something went wrong running the command!'
-        exit 1
-      end
+  unless cmd_opts[:nodelay]
+    3.step(0, -1) do |i|
+      puts "#{i} seconds..."
       sleep 1
     end
   end
-  # TODO
+
+  unless cmd_opts[:dryrun]
+    begin
+      execute_commands(commands)
+    rescue StandardError => e
+      warn "Command failed: #{e}"
+      warn ''
+      warn 'Backing out...'
+      execute_commands("#{VBOX} unregistervm --delete '#{cmd_opts[:name]}'")
+      warn ''
+      warn 'Something went wrong!'
+    end
+  end
 when 'delete'
-  # TODO
+  puts
+  puts 'Attempting to shut down the VM...'
+
+  shutdown_vm(VM[:uuid], wait: true)
+
+  puts
+  puts 'Attempting to delete the VM...'
+
+  begin
+    execute_commands("#{VBOX} unregistervm --delete #{VM[:uuid]}")
+  rescue StandardError
+    warn ''
+    warn 'Something went wrong deleting the VM!'
+    exit 1
+  end
 when 'snapshot'
-  # TODO
+  unless cmd_opts[:no_delete]
+    begin
+      puts 'Deleting existing snapshot, if any'
+      execute_commands("#{VBOX} snapshot '#{VM[:uuid]}' delete '#{cmd_opts[:snapshot]}'")
+    rescue StandardError
+      puts "Failed to delete existing snapshot, there probably isn't one"
+      puts
+    end
+  end
+
+  unless cmd_opts[:only_delete]
+    puts 'Trying to take live snapshot...'
+
+    begin
+      execute_commands("#{VBOX} snapshot '#{VM[:uuid]}' take '#{cmd_opts[:snapshot]}' --live")
+    rescue StandardError
+      puts
+      puts 'Live snapshot failed, trying non-live snapshot'
+      execute_commands("#{VBOX} snapshot '#{VM[:uuid]}' take '#{cmd_opts[:snapshot]}'")
+    end
+  end
 when 'restore'
-  # TODO
-when 'boot'
+  shutdown_vm(VM[:uuid], wait: true)
+
+  if cmd_opts[:snapshot]
+    execute_commands("#{VBOX} snapshot '#{VM[:uuid]}' restore '#{cmd_opts[:snapshot]}'")
+  else
+    execute_commands("#{VBOX} snapshot '#{VM[:uuid]}' restorecurrent")
+  end
+when 'start'
   # TODO
 when 'stop'
-  # TODO
+  shutdown_vm(VM[:uuid], wait: false)
+when 'stopall'
+  VMS_BY_NAME.each_pair do |n, u|
+    puts
+    puts "Shutting down #{n}..."
+    shutdown_vm(u, wait: false)
+  end
 when 'suspend'
-  # TODO
+  suspend_vm(VM[:uuid], wait: false)
 when 'suspendall'
-  # TODO
+  VMS_BY_NAME.each_pair do |n, u|
+    puts
+    puts "Suspending #{n}..."
+    suspend_vm(u, wait: false)
+  end
 when 'ostypes'
   puts OS_TYPES.join("\n")
 else
@@ -391,53 +527,6 @@ else
 end
 
 exit 0
-
-# # Set up the networking
-# $(dirname $0)/vbox-set-up-networking.sh "$NAME"
-
-# # Set up shared folders
-# $(dirname $0)/vbox-add-shared-folders.sh "$NAME" "public"
-
-# # Create a SCSI and a IDE interface
-# #$VBOX storagectl "$NAME" --name scsi --add scsi || die "Failed to create SCSI interface}"
-# echo ">>> Creating an IDE interface..."
-# $VBOX storagectl "$NAME" --name ide  --add ide || die "Failed to create IDE interface"
-
-# # Create a harddrive file
-# echo ">>> Cearing a harddrive: $HDD_FILE..."
-# $VBOX createhd --filename "$HDD_FILE" --size "$HDD_SIZE" || die "Failed to crate harddrive file: $HDD_FILE"
-
-# # Attach the Harddrive
-# echo ">>> Attaching the harddrive"
-# $VBOX storageattach "$NAME" --storagectl ide --type hdd --medium "$HDD_FILE" --port 0 --device 0 || die "Failed to attach $HDD_FILE"
-
-# # Attach the requested ISO
-# $(dirname $0)/vbox-mount-cd.sh "$NAME" "$ISO"
-
-# # Turn the VM on, in the background
-# echo "Starting the UI in the background and waiting..."
-# $(dirname $0)/vbox-ui.sh "$NAME" &
-
-# echo "--------------------------------------------------------------------------------"
-# echo "Press <ENTER> when you're ready to install drivers (this will disconnect"
-# echo "the currenly loaded ISO)"
-# echo ""
-# echo "(Press ctrl+alt to release mouse from VM UI)"
-# echo "--------------------------------------------------------------------------------"
-
-# read
-
-# echo "Attaching guest additions CD..."
-# $(dirname $0)/vbox-install-additions.sh "$NAME"
-
-# echo "--------------------------------------------------------------------------------"
-# echo "Press <ENTER> when you're ready to take a base snapshot"
-# echo "(Press ctrl+alt to release mouse)"
-# echo "--------------------------------------------------------------------------------"
-
-# read
-
-# $(dirname $0)/vbox-snapshot.sh "$NAME" "base install"
 
 # echo "--------------------------------------------------------------------------------"
 # echo "Everything should be set up!"
