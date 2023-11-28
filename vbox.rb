@@ -3,13 +3,6 @@
 require 'optimist'
 require 'fileutils'
 
-# Things to look into:
-# * Unattended install
-# * OVF
-# * VM tools
-# * Clone
-# * Start/stop
-
 UUID_REGEX = '[0-9a-fA-F]{8}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{12}'
 
 # Set up defaults
@@ -22,8 +15,6 @@ DEFAULT_CPUS = 2
 DEFAULT_SHARE = '~/shared:shared'
 DEFAULT_HDD_FILENAME = 'hdd.vmi'
 VM_DIR = '~/VirtualBox VMs'
-
-# HDD_FILE = 'hdd.vmi'
 
 SUBCOMMANDS = [
   {
@@ -40,6 +31,16 @@ SUBCOMMANDS = [
     name: 'create',
     description: 'Create a new VM',
     requires_vm: false,
+  },
+  {
+    name: 'import',
+    description: 'Import a VM from OVA or OVF',
+    requires_vm: false,
+  },
+  {
+    name: 'clone',
+    description: 'Clone an existing VM',
+    requires_vm: true,
   },
   {
     name: 'delete',
@@ -173,7 +174,7 @@ cmd_opts = Optimist.options do
     opt(:bridge, 'The network to bridge networking to', default: DEFAULT_BRIDGE)
     opt(:hdd_size, "The size, in MB, of the VM's HDD", default: DEFAULT_HDD_SIZE)
     opt(:vram, "The size, in MB, of the VM's VRAM", default: DEFAULT_VRAM)
-    opt(:ostype, "The OS type (use '#{$PROGRAM_NAME} ostypes' for a list of options)", default: DEFAULT_OSTYPE)
+    opt(:ostype, "The OS type (use '#{$PROGRAM_NAME} ostypes' for a list of options) - by default, will try and detect from the ISO", type: String, required: false)
     opt(:cpus, 'The number of CPUs', default: DEFAULT_CPUS)
     opt(:share, 'Folder to share (format is "localpath:name")', default: DEFAULT_SHARE)
     opt(:hdd_filename, "Name of the harddrive file (relative to the VM's folder)", default: DEFAULT_HDD_FILENAME)
@@ -181,6 +182,19 @@ cmd_opts = Optimist.options do
     opt(:dir, 'The directory to store VMs in', default: VM_DIR)
     opt(:dryrun, "Show the command but don't actually make any changes", default: false)
     opt(:nodelay, "Don't wait for the user to cancel", default: false)
+    opt(:nostart, "Don't start the VM after creating it", default: false)
+  when 'import'
+    opt(:dir, 'The directory to store VMs in', default: VM_DIR)
+    opt(:file, 'The OVA or OVF file', type: String, required: true)
+
+    opt(:ostype, "The OS type (use '#{$PROGRAM_NAME} ostypes' for a list of options)", type: String, required: false)
+    opt(:name, 'Give this name to the VM', type: String, required: false)
+    opt(:cpus, 'The number of CPUs', type: Integer, required: false)
+    opt(:memory, "The size, in MB, of the VM's memory", type: Integer, required: false)
+  when 'clone'
+    opt(:dir, 'The directory to store VMs in', default: VM_DIR)
+    opt(:newname, 'The new VM name', type: String, required: true)
+    opt(:nostart, "Don't start the VM after cloning it", default: false)
   when 'delete'
     # n/a
   when 'snapshot'
@@ -190,7 +204,7 @@ cmd_opts = Optimist.options do
   when 'restore'
     opt(:snapshot, 'The name of the snapshot to restore (by default, will use the most recent)', required: false)
   when 'start'
-    # n/a
+    opt(:headless, 'Start headless?', default: false)
   when 'stop'
     # n/a
   when 'suspend'
@@ -341,17 +355,23 @@ def suspend_vm(uuid, wait: true)
   info = vm_info(uuid)
   if info['VMState'] != 'running'
     puts "VM isn't running, it's #{info['VMState']}"
-    return
+    return false
   end
 
   puts
   puts 'Saving VM state...'
   execute_commands("#{VBOX} controlvm #{VM[:uuid]} savestate")
 
-  return unless wait
+  return true unless wait
 
   puts 'Waiting a few seconds for suspend to complete (not sure how to do this more efficiently...)'
   sleep(5)
+
+  true
+end
+
+def start_vm(uuid, type: 'gui')
+  execute_commands("#{VBOX} startvm '#{uuid}' --type #{type}")
 end
 
 case command
@@ -382,27 +402,52 @@ when 'create'
     exit 1
   end
 
-  unless OS_TYPES.include?(cmd_opts[:ostype])
-    warn "Invalid ostype: #{cmd_opts[:iso]}"
-    warn "Run '#{$PROGRAM_NAME} ostypes' for a full list"
+  # Try and detect the ostype if it's not specified
+  if cmd_opts[:ostype]
+    ostype = cmd_opts[:ostype]
+  else
+    puts
+    puts 'Trying to detect OSType...'
+
+    vminfo = `#{VBOX} unattended detect --iso='#{cmd_opts[:iso]}' --machine-readable`
+             .split("\n")
+             .grep(/^OSTypeId=/)
+
+    if vminfo.nil? || vminfo.empty?
+      puts
+      puts "Couldn't detect OSType, using #{DEFAULT_OSTYPE}"
+      ostype = DEFAULT_OSTYPE
+    else
+      ostype = vminfo
+               .pop
+               .gsub(/.*=/, '')
+               .gsub('"', '')
+
+      puts
+      puts "Detected ostype = #{ostype}"
+    end
+  end
+
+  unless OS_TYPES.include?(ostype)
+    warn "Invalid ostype: #{ostype}"
+    warn "Run '#{$PROGRAM_NAME} ostypes' for a full list and use --ostype to specify one"
     exit 1
   end
 
-  DIR = File.expand_path(cmd_opts[:dir])
-  HDD_FILENAME = File.join(DIR, cmd_opts[:name], cmd_opts[:hdd_filename])
+  HDD_FILENAME = File.join(File.expand_path(cmd_opts[:dir]), cmd_opts[:name], cmd_opts[:hdd_filename])
 
   unless cmd_opts[:dryrun]
-    FileUtils.mkdir_p(DIR)
+    FileUtils.mkdir_p(File.expand_path(cmd_opts[:dir]))
   end
 
   # The basic set of commands
   commands = [
-    "#{VBOX} createvm --name='#{cmd_opts[:name]}' --register --basefolder='#{DIR}'",
+    "#{VBOX} createvm --name='#{cmd_opts[:name]}' --register --basefolder='#{File.expand_path(cmd_opts[:dir])}'",
     "#{VBOX} modifyvm '#{cmd_opts[:name]}' --memory #{cmd_opts[:memory]}",
     "#{VBOX} modifyvm '#{cmd_opts[:name]}' --ioapic on",
     "#{VBOX} modifyvm '#{cmd_opts[:name]}' --vram #{cmd_opts[:vram]}",
-    "#{VBOX} modifyvm '#{cmd_opts[:name]}' --os-type '#{cmd_opts[:ostype]}'",
-    "#{VBOX} modifyvm '#{cmd_opts[:name]}' --boot1 dvd --boot2 disk --boot3 none --boot4 none",
+    "#{VBOX} modifyvm '#{cmd_opts[:name]}' --os-type '#{ostype}'",
+    "#{VBOX} modifyvm '#{cmd_opts[:name]}' --boot1 disk --boot2 dvd --boot3 none --boot4 none",
     "#{VBOX} modifyvm '#{cmd_opts[:name]}' --cpus #{cmd_opts[:cpus]}",
     "#{VBOX} modifyvm '#{cmd_opts[:name]}' --audio-driver none",
     "#{VBOX} modifyvm '#{cmd_opts[:name]}' --graphicscontroller vmsvga",
@@ -458,6 +503,10 @@ when 'create'
   unless cmd_opts[:dryrun]
     begin
       execute_commands(commands)
+
+      unless cmd_opts[:nostart]
+        start_vm(cmd_opts[:name])
+      end
     rescue StandardError => e
       warn "Command failed: #{e}"
       warn ''
@@ -466,6 +515,51 @@ when 'create'
       warn ''
       warn 'Something went wrong!'
     end
+  end
+when 'import'
+  # Sanity checks
+  unless File.exist?(cmd_opts[:file])
+    warn "Image file does not appear to exist: #{cmd_opts[:file]}"
+    exit 1
+  end
+
+  # Optional args
+  opts = [
+    cmd_opts[:ostype].nil? ? nil : "--vsys 0 --ostype '#{cmd_opts[:ostype]}'",
+    cmd_opts[:name].nil?   ? nil : "--vsys 0 --vmname '#{cmd_opts[:name]}'",
+    cmd_opts[:cpus].nil?   ? nil : "--vsys 0 --cpus #{cmd_opts[:cpus]}",
+    cmd_opts[:memory].nil? ? nil : "--vsys 0 --memory #{cmd_opts[:memory]}",
+  ].compact.join(' ')
+
+  execute_commands("#{VBOX} import --vsys 0 --eula accept --vsys 0 --basefolder='#{File.expand_path(cmd_opts[:dir])}' '#{cmd_opts[:file]}' #{opts}")
+when 'clone'
+  unless VMS_BY_NAME[cmd_opts[:newname]].nil?
+    warn "A VM with that name already exists: #{cmd_opts[:newname]}"
+    exit 1
+  end
+
+  puts
+  puts 'Attempting to suspend the VM...'
+  was_running = suspend_vm(VM[:uuid], wait: true)
+
+  begin
+    execute_commands(
+      [
+        "#{VBOX} clonevm #{VM[:uuid]} --name '#{cmd_opts[:newname]}' --basefolder='#{File.expand_path(cmd_opts[:dir])}' --mode machine --register",
+        "#{VBOX} discardstate '#{cmd_opts[:newname]}'",
+        "#{VBOX} modifyvm '#{cmd_opts[:newname]}' --mac-address1 auto --mac-address2 auto --mac-address3 auto --mac-address4 auto",
+      ]
+    )
+  ensure
+    if was_running
+      puts
+      puts 'Restarting the original VM...'
+      start_vm(VM[:uuid])
+    end
+  end
+
+  unless cmd_opts[:nostart]
+    start_vm(cmd_opts[:newname])
   end
 when 'delete'
   puts
@@ -514,7 +608,13 @@ when 'restore'
     execute_commands("#{VBOX} snapshot '#{VM[:uuid]}' restorecurrent")
   end
 when 'start'
-  # TODO
+  puts
+
+  if cmd_opts[:headless]
+    start_vm(VM[:uuid], type: 'headless')
+  else
+    start_vm(VM[:uuid])
+  end
 when 'stop'
   shutdown_vm(VM[:uuid], wait: false)
 when 'stopall'
