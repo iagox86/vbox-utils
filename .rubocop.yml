@@ -37,6 +37,9 @@ Style/IfUnlessModifier:
 Metrics/BlockNesting:
   Enabled: false
 
+Style/TrailingCommaInArguments:
+  Enabled: false
+
 # Defaults:
 Gemspec/DeprecatedAttributeAssignment:
   Enabled: true

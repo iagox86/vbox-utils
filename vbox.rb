@@ -5,8 +5,10 @@ require 'fileutils'
 
 # Things to look into:
 # * Unattended install
-# * Clipboard
 # * OVF
+# * VM tools
+# * Clone
+# * Start/stop
 
 UUID_REGEX = '[0-9a-fA-F]{8}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{12}'
 
@@ -87,7 +89,12 @@ SUBCOMMANDS = [
   {
     name: 'mount',
     description: 'Mount an ISO',
-    requires_vm: false,
+    requires_vm: true,
+  },
+  {
+    name: 'unmount',
+    description: 'Unmount an ISO',
+    requires_vm: true,
   },
 ].freeze
 
@@ -189,6 +196,10 @@ cmd_opts = Optimist.options do
   when 'suspend'
     # n/a
   when 'suspendall'
+    # n/a
+  when 'mount'
+    opt(:iso, 'Mount the given iso', type: String, required: true)
+  when 'unmount'
     # n/a
   end
 end
@@ -522,6 +533,27 @@ when 'suspendall'
   end
 when 'ostypes'
   puts OS_TYPES.join("\n")
+when 'mount'
+  unless File.exist?(cmd_opts[:iso])
+    warn "ISO file does not appear to exist: #{cmd_opts[:iso]}"
+    exit 1
+  end
+
+  # begin
+  #   execute_commands(
+  #     "#{VBOX} storagectl '#{VM[:uuid]}' --name ide --remove",
+  #   )
+  # rescue StandardError
+  #   puts 'Failed to detach medium, that might be okay'
+  # end
+
+  execute_commands(
+    "#{VBOX} storageattach '#{VM[:uuid]}' --storagectl ide --type dvddrive --medium '#{cmd_opts[:iso]}' --port 0 --device 0",
+  )
+when 'unmount'
+  execute_commands(
+    "#{VBOX} storageattach '#{VM[:uuid]}' --storagectl ide --type dvddrive --medium emptydrive --port 0 --device 0",
+  )
 else
   warn 'Error!'
 end
