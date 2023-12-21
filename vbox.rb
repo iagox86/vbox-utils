@@ -1,3 +1,4 @@
+#!/usr/bin/env ruby
 # frozen_string_literal: true
 
 require 'optimist'
@@ -6,7 +7,7 @@ require 'fileutils'
 UUID_REGEX = '[0-9a-fA-F]{8}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{12}'
 
 # Set up defaults
-DEFAULT_MEMORY = 1024
+DEFAULT_MEMORY = 4096
 DEFAULT_BRIDGE = 'wlp0s20f3'
 DEFAULT_HDD_SIZE = 32_000 # Set 32gb harddrive
 DEFAULT_VRAM = 16
@@ -386,7 +387,15 @@ when 'list'
   end
 
   vm_names.each do |n|
-    puts "#{VMS_BY_NAME[n]} #{n}"
+    uuid = VMS_BY_NAME[n]
+    info = vm_info(uuid)
+    puts "#{uuid} #{n} (#{info['VMState']})"
+
+    # info = vm_info(uuid)
+    # if info['VMState'] != 'running'
+    #   puts "VM isn't running, it's #{info['VMState']}"
+    #   return
+    # end
   end
 when 'info'
   pp vm_info(VM[:uuid])
