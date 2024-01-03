@@ -503,10 +503,10 @@ def handle_command(command, cmd_opts, vm = nil)
       "#{VBOX} modifyvm '#{cmd_opts[:name]}' --nic2 nat --cableconnected2 on",
       # "#{VBOX} modifyvm '#{cmd_opts[:name]}' --nic3 hostonly --cableconnected3 on",
 
-      # SCSI will be used for the HDD
-      "#{VBOX} storagectl '#{cmd_opts[:name]}' --name scsi --add scsi",
+      # SATA will be used for the HDD
+      "#{VBOX} storagectl '#{cmd_opts[:name]}' --name sata --controller IntelAhci --add sata",
       "#{VBOX} createhd --filename '#{hdd_filename}' --size '#{cmd_opts[:hdd_size]}'",
-      "#{VBOX} storageattach '#{cmd_opts[:name]}' --storagectl scsi --type hdd --medium '#{hdd_filename}' --port 0 --device 0",
+      "#{VBOX} storageattach '#{cmd_opts[:name]}' --storagectl sata --type hdd --medium '#{hdd_filename}' --port 0 --device 0",
 
       # IDE will be used for CDRom
       "#{VBOX} storagectl '#{cmd_opts[:name]}' --name ide  --add ide",
