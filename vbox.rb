@@ -10,7 +10,8 @@ UUID_REGEX = '[0-9a-fA-F]{8}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\
 DEFAULT_MEMORY = 4096
 DEFAULT_BRIDGE = 'wlp0s20f3'
 DEFAULT_HDD_SIZE = 32_000 # Set 32gb harddrive
-DEFAULT_VRAM = 16
+DEFAULT_VRAM = 32
+DEFAULT_GFX_CONTROLLER = 'vboxsvga'
 DEFAULT_OSTYPE = 'Linux26_64'
 DEFAULT_CPUS = 2
 DEFAULT_SHARE = '~/shared:shared'
@@ -494,7 +495,7 @@ def handle_command(command, cmd_opts, vm = nil)
       "#{VBOX} modifyvm '#{cmd_opts[:name]}' --boot1 disk --boot2 dvd --boot3 none --boot4 none",
       "#{VBOX} modifyvm '#{cmd_opts[:name]}' --cpus #{cmd_opts[:cpus]}",
       "#{VBOX} modifyvm '#{cmd_opts[:name]}' --audio-driver none",
-      "#{VBOX} modifyvm '#{cmd_opts[:name]}' --graphicscontroller vmsvga",
+      "#{VBOX} modifyvm '#{cmd_opts[:name]}' --graphicscontroller '#{DEFAULT_GFX_CONTROLLER}'",
       "#{VBOX} modifyvm '#{cmd_opts[:name]}' --usb off --usbehci off --usbxhci off",
 
       "#{VBOX} modifyvm '#{cmd_opts[:name]}' --clipboard-mode bidirectional",
