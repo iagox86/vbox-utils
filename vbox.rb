@@ -343,8 +343,8 @@ end
 # Get a list of OSTypes, which are used in a couple different commands
 OS_TYPES = `#{VBOX} list ostypes`
            .split("\n")
-           .grep(/^ID:/)
-           .map { |line| line.gsub(/^ID: */, '') }
+           .grep(/^ID/)
+           .map { |line| line.gsub(/^ID[^:]*: */, '').gsub(/ .*$/, '') }
            .sort
            .uniq
 
